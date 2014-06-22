@@ -1,0 +1,103 @@
+Practical Machine Learning: Project Writeup
+========================================================
+
+Introduction: The goal of this project is to use data from accelorometers on the belt, forearm, arm and dumbell of 6 participants to predict the manner in which they peformed the exercise.
+
+```{r}
+library(caret)
+library(knitr)
+library(doMC)
+
+# registering the number of cores to be used.
+registerDoMC(cores=16)
+
+# Setting seed
+set.seed(12345)
+```
+
+Business Understanding: The data consists of 160 variables including the classe variable which has 5 possile values (A,B,C,D,E). The goal of the project is to identify the value of the classe variable using the other variables.
+
+We get rid of the first 5 varibles in the data, namely: X, user_name, and 3 time-stamps, as they are not relevant in the prediction of the classe variable. The time at which the exercise is performed should not determine what kind of exercise was performed. Hence, it is not used in the prediction.
+
+```{r}
+data <- read.csv('/home/aditya/R/pml-training.csv')
+predict <- read.csv('/home/aditya/R/pml-testing.csv')
+
+# Removing 5 columns:
+data <- data[, -c(1:5)]
+predict <- predict[, -c(1:5)]
+```
+
+Data Understanding: The data consists of various numeric and non numeric variables/attributes. Quite a few of the variables also have missing or 'NA' values. We remove variables which have non numeric values. We also remove variables which have more than ¼th of the values as missing/NA. This helps us get rid of variables which may not play a significant role in the prediction and also reduces the number of variables so that our model can be built faster.
+
+Data Prepartion:
+
+Once the attributes having non-numneric or missing values have been removed, we split the training data into training, testing and validation sets to help in builing and testing the accuracy of our model. 20% of the data is set aside for final validation and to find out 'out of sample' error. 30% of the remaining 80% is used to test the various models we build.
+
+The train, test and validate data sets obtained are further processed using the preProcess method to perform center, scale and BoxCox transformations. These scaled data sets are used for training and testing our models, and for final validation.
+
+```{r}
+# Removing non-numeric columns both data.
+data <- data[,colSums(is.na(data))<(nrow(data)/4)]
+dataNum <- sapply(data, is.numeric)
+
+# dataX contains non numeric entries only.
+dataX <- data[,dataNum]
+
+# Retaining - should we use datX or data-92 as predict[,names(data[,-92])]
+predict <- predict[,names(dataX)]
+
+# Splitting in train, test, validate.
+inTraining<-createDataPartition(y=data$classe,p=0.8,list=FALSE)
+
+training <- data[inTraining,]
+validate <- data[-inTraining,]
+
+inTrain <- createDataPartition(y=training$classe,p=0.7,list=FALSE)
+
+train <- training[inTrain,]
+test <- training[-inTrain,]
+
+# Keeping only columns present in dataX
+trainX <- train[,names(dataX)]
+testX <- test[,names(dataX)]
+validateX <- validate[,names(dataX)]
+
+
+# Pre-processing to center, scale and pca.
+preProcValues <- preProcess(dataX, method = c("center","scale","BoxCox"))
+
+# Applying preprocessing to train, test, validate.
+preProcValues
+
+scaledTrain <- predict(preProcValues, trainX)
+scaledTest <- predict(preProcValues, testX)
+scaledValidate <- predict(preProcValues, validateX)
+scaledPredict <- predict(preProcValues,predict)
+```
+
+Modelling: Once we have our data ready, we build a random forest model using repeated (3 times) 10-k cross validation. The model takes about 10 minutes to build on a server machine having 16 cores and 64 GB of RAM.
+
+We get a model with about 99.7% accuracy on the testing set. We can see that the num_window variable has the most importance (100%).
+
+```{r}
+cvCtrl <- trainControl(method = "repeatedcv", number=10, repeats = 3)
+
+modelFit <- train(train$classe ~ .,method = 'rf', data=scaledTrain, trControl = cvCtrl )
+confusionMatrix(test$classe, predict(modelFit, scaledTest))
+varImp(modelFit)
+```
+
+Other models: preProcess(dataX, method = c(“center”, “scale”, “pca”, “BoxCox”), thresh = 0.98) The use of Princiapal Component Analysis with 98% variance threshold results in a longer time to build the model while giving a lesser accuracy of 97.71%
+
+Validation: We validate the model once on our validation set to get an 'out of sample' error rate/accuracy. It gives us a high accuracy of 99.7%
+
+```{r}
+confusionMatrix(validate$classe, predict(modelFit, scaledValidate))
+```
+
+Deployment: We finally use our model to predict the 20 unknown instances in the testing set provided to us.
+
+```{r}
+predict(modelFit, scaledPredict)
+```
